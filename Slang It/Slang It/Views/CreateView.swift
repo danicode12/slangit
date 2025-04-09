@@ -8,65 +8,118 @@ struct CreateView: View {
     @State private var definition: String = ""
     @State private var showAlert = false
     @State private var isLoading = false
-    @State private var alertMessage = "Your slang word has been added!"
+    @State private var alertMessage = "your new word is out!"
     
     var body: some View {
         ZStack {
             // Background
-            Color.white
+            Color(UIColor.systemBackground)
                 .edgesIgnoringSafeArea(.all)
             
-            VStack {
-                Text("feeling creative?")
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
-                    .foregroundColor(.black)
-                    .padding(.top, 80)
-                
-                Spacer()
-                
-                // Centered content container
-                VStack(spacing: 25) {
-                    // Word input
-                    TextField("type a new word...", text: $word)
-                        .padding()
-                        .background(Color.orange)
-                        .cornerRadius(10)
-                        .foregroundColor(.white)
-                    
-                    // Definition input
-                    TextField("what does it mean?", text: $definition)
-                        .padding()
-                        .frame(height: 120)
-                        .background(Color.yellow)
-                        .cornerRadius(10)
+            // Notebook paper background
+            VStack(spacing: 0) {
+                // Content with notebook paper styling
+                VStack {
+                    Text("feeling creative?")
+                        .font(.system(size: 32, weight: .bold))
                         .foregroundColor(.black)
-                        .multilineTextAlignment(.leading)
+                        .padding(.top, 80)
                     
-                    // Submit button
-                    Button(action: {
-                        addNewWord()
-                    }) {
-                        if isLoading {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                        } else {
-                            Text("slang it")
-                                .font(.headline)
-                                .foregroundColor(.white)
+                    Spacer()
+                    
+                    // First text field - word input with custom styling
+                    VStack(alignment: .leading, spacing: 15) {
+                        // Custom text field implementation for better placeholder visibility
+                        ZStack(alignment: .leading) {
+                            if word.isEmpty {
+                                Text("type a new word...")
+                                    .font(.system(size: 32, weight: .black))
+                                    .foregroundColor(.black.opacity(0.7))
+                            }
+                            
+                            TextField("", text: $word)
+                                .font(.system(size: 32, weight: .black))
+                                .foregroundColor(.black)
+                        }
+                        .padding(.bottom, 10)
+                        
+                        // Definition input - yellow box
+                        ZStack(alignment: .topLeading) {
+                            // This is now only for the placeholder
+                            if definition.isEmpty {
+                                Text("what does it mean?")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(.black.opacity(0.7))
+                                    .padding(.top, 15)
+                                    .padding(.leading, 15)
+                                    .zIndex(1) // Ensure placeholder is above the TextEditor
+                            }
+                                                    
+                            // Modified TextEditor with the background color directly applied
+                            // We wrap it in a background view to ensure complete coverage
+                            TextEditor(text: $definition)
+                                .font(.system(size: 16))
+                                .foregroundColor(.black)
+                                .padding(10)
+                                .frame(height: 200)
+                                .background(Color(hex: "EDD377")) // Apply yellow color directly
+                                .cornerRadius(0) // No rounded corners
+                            }
+                            .frame(height: 200)
+                            .background(Color(hex: "EDD377")) // Backup background color
+                                                
+                        
+                        // Submit button - navy blue button
+                        Button(action: {
+                            addNewWord()
+                        }) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 30)
+                                    .fill(Color(hex: "162959")) // Navy blue
+                                    .frame(height: 60)
+                                
+                                if isLoading {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                } else {
+                                    Text("slang it")
+                                        .font(.system(size: 18, weight: .bold))
+                                        .foregroundColor(.white)
+                                }
+                            }
+                        }
+                        .padding(.top, 20)
+                        .disabled(isLoading)
+                    }
+                    .padding(.horizontal, 30)
+                    
+                    Spacer()
+                }
+                .background(
+                    ZStack {
+                        // Base paper color
+                        Color.white
+                        
+                        // Horizontal lines - evenly spaced across the screen
+                        VStack(spacing: 24) {
+                            ForEach(0..<30, id: \.self) { _ in
+                                Rectangle()
+                                    .fill(Color.blue.opacity(0.2))
+                                    .frame(height: 1)
+                            }
+                        }
+                        .padding(.top, 36) // Offset to start lines in the right position
+                        
+                        // Red margin line
+                        HStack {
+                            Rectangle()
+                                .fill(Color.red.opacity(0.5))
+                                .frame(width: 1)
+                                .padding(.leading, 35)
+                            Spacer()
                         }
                     }
-                    .frame(height: 50)
-                    .frame(maxWidth: .infinity)
-                    .background(Color.blue)
-                    .cornerRadius(10)
-                    .disabled(isLoading)
-                    .padding(.top, 10)
-                }
-                .padding(.horizontal, 30)
-                .frame(maxHeight: 400)
-                
-                Spacer()
+                )
             }
         }
         .alert(isPresented: $showAlert) {
@@ -98,5 +151,33 @@ struct CreateView: View {
                 }
             }
         }
+    }
+}
+
+// Helper extension for hex colors
+extension Color {
+    init(hex: String) {
+        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&int)
+        let a, r, g, b: UInt64
+        switch hex.count {
+        case 3: // RGB (12-bit)
+            (a, r, g, b) = (255, (int >> 8) * 17, (int >> 4 & 0xF) * 17, (int & 0xF) * 17)
+        case 6: // RGB (24-bit)
+            (a, r, g, b) = (255, int >> 16, int >> 8 & 0xFF, int & 0xFF)
+        case 8: // ARGB (32-bit)
+            (a, r, g, b) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
+        default:
+            (a, r, g, b) = (1, 1, 1, 0)
+        }
+        
+        self.init(
+            .sRGB,
+            red: Double(r) / 255,
+            green: Double(g) / 255,
+            blue: Double(b) / 255,
+            opacity: Double(a) / 255
+        )
     }
 }
