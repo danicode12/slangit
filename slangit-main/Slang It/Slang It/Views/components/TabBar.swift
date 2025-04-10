@@ -7,14 +7,10 @@ enum Tab: String, CaseIterable {
     
     var icon: String {
         switch self {
-        case .discover: return "list.clipboard"
-        case .create: return "plus.circle"
-        case .profile: return "person"
+        case .discover: return "pencil"         // Left icon (pencil)
+        case .create: return "target"           // Middle icon (target/bullseye)
+        case .profile: return "person.fill"     // Right icon (person)
         }
-    }
-    
-    var title: String {
-        return self.rawValue.capitalized
     }
 }
 
@@ -26,26 +22,27 @@ struct CustomTabBar: View {
             ForEach(Tab.allCases, id: \.self) { tab in
                 Spacer()
                 
-                VStack(spacing: 8) {
-                    Image(systemName: tab.icon)
-                        .font(.system(size: 20))
-                        .foregroundColor(selectedTab == tab ? .white : .white.opacity(0.5))
-                    
-                    Text(tab == .create ? "create" : tab == .discover ? "discover" : "profile")
-                        .font(.caption)
-                        .foregroundColor(selectedTab == tab ? .white : .white.opacity(0.5))
-                }
-                .padding(.vertical, 10)
-                .onTapGesture {
-                    withAnimation(.easeInOut) {
-                        selectedTab = tab
+                Image(systemName: tab.icon)
+                    .font(.system(size: 20))
+                    .foregroundColor(Color(UIColor(red: 10/255, green: 30/255, blue: 80/255, alpha: 1)))
+                    .frame(height: 25)
+                    .padding(.horizontal, 10)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        withAnimation(.easeInOut) {
+                            selectedTab = tab
+                        }
                     }
-                }
                 
                 Spacer()
             }
         }
-        .frame(width: UIScreen.main.bounds.width, height: 60)
-        .background(Color.black.opacity(0.2))
+        .frame(width: 200, height: 50)
+        .background(
+            Capsule()
+                .fill(Color(UIColor(red: 220/255, green: 180/255, blue: 80/255, alpha: 1))) // Gold/yellow color
+                .shadow(color: Color.black.opacity(0.15), radius: 5, x: 0, y: 2)
+        )
+        .padding(.bottom, 20)
     }
 }

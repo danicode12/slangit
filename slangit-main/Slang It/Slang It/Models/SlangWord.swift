@@ -55,8 +55,8 @@ struct SlangWord: Identifiable, Codable {
             "definition": definition,
             "createdBy": createdBy,
             "username": username,
-            "upvotes": upvotes,
-            "downvotes": downvotes,
+            "upvotes": upvotes as NSNumber,
+            "downvotes": downvotes as NSNumber,
             "createdAt": Timestamp(date: createdAt)
         ]
     }

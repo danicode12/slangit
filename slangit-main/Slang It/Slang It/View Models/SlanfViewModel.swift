@@ -18,16 +18,75 @@ class SlangViewModel: ObservableObject {
     private let username = "User\(Int.random(in: 1000...9999))"
     
     private let dataService = DataService.shared
+    private var refreshTimer: Timer?
+    private var lastWordsFetchTime: Date = .distantPast
+    private let refreshInterval: TimeInterval = 60 // Refresh every minute
     
     init() {
         // Immediately load preloaded words so UI isn't empty
-        allWords = dataService.getPreloadedWords()
+        allWords = dataService.getPreloadedWords().shuffled()
         currentWord = allWords.first
+        
+        // Fix any older documents that might be missing upvotes/downvotes fields
+        dataService.prepareOldWordDocuments()
         
         // Then attempt to load from Firebase
         Task {
             await loadWords()
             await loadTopWords()
+        }
+        
+        // Set up periodic refresh timer
+        setupRefreshTimer()
+    }
+    
+    deinit {
+        refreshTimer?.invalidate()
+    }
+    
+    private func setupRefreshTimer() {
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
+            Task { [weak self] in
+                await self?.checkForNewWords()
+            }
+        }
+    }
+    
+    @MainActor
+    func checkForNewWords() async {
+        // Only check for new words if we're not already loading
+        guard !isLoading else { return }
+        
+        do {
+            // Get the newest words since our last fetch
+            let newWords = try await dataService.getNewestWords(since: lastWordsFetchTime)
+            lastWordsFetchTime = Date()
+            
+            if !newWords.isEmpty {
+                print("Found \(newWords.count) new words since last refresh")
+                
+                // Add new words to our existing list, avoiding duplicates
+                let existingIds = Set(allWords.compactMap { $0.id })
+                let uniqueNewWords = newWords.filter { word in
+                    guard let id = word.id else { return false }
+                    return !existingIds.contains(id)
+                }
+                
+                if !uniqueNewWords.isEmpty {
+                    // Add new words and completely reshuffle the deck
+                    var updatedWords = allWords
+                    updatedWords.append(contentsOf: uniqueNewWords)
+                    
+                    // Perform complete randomization
+                    allWords = randomizeWordsWithPriority(updatedWords)
+                    
+                    // Reset to beginning after reshuffling
+                    currentIndex = 0
+                    currentWord = allWords.first
+                }
+            }
+        } catch {
+            print("Error checking for new words: \(error.localizedDescription)")
         }
     }
     
@@ -36,17 +95,22 @@ class SlangViewModel: ObservableObject {
         isLoading = true
         
         do {
-            allWords = try await dataService.getWords()
-            if !allWords.isEmpty {
+            let words = try await dataService.getWords()
+            lastWordsFetchTime = Date()
+            
+            if !words.isEmpty {
+                // Completely randomize the order with priority
+                allWords = randomizeWordsWithPriority(words)
                 currentIndex = 0
-                currentWord = allWords[currentIndex]
+                currentWord = allWords.first
             } else {
                 currentWord = nil
             }
         } catch {
             // If loading fails, ensure we still have preloaded words
             if allWords.isEmpty {
-                allWords = dataService.getPreloadedWords()
+                let preloaded = dataService.getPreloadedWords()
+                allWords = randomizeWordsWithPriority(preloaded)
                 currentIndex = 0
                 currentWord = allWords.first
             }
@@ -54,6 +118,48 @@ class SlangViewModel: ObservableObject {
         }
         
         isLoading = false
+    }
+    
+    private func randomizeWordsWithPriority(_ words: [SlangWord]) -> [SlangWord] {
+        // Split into recent user words (last 24 hours) and older words
+        let now = Date()
+        let oneDayAgo = now.addingTimeInterval(-86400) // 24 hours ago
+        
+        // Recent user words get highest priority
+        let recentUserWords = words.filter {
+            $0.createdBy != "system" && $0.createdAt > oneDayAgo
+        }
+        
+        // Older user words get medium priority
+        let olderUserWords = words.filter {
+            $0.createdBy != "system" && $0.createdAt <= oneDayAgo
+        }
+        
+        // System words get lowest priority
+        let systemWords = words.filter { $0.createdBy == "system" }
+        
+        // Shuffle each group individually
+        let shuffledRecentUserWords = recentUserWords.shuffled()
+        let shuffledOlderUserWords = olderUserWords.shuffled()
+        let shuffledSystemWords = systemWords.shuffled()
+        
+        // For extra randomness, decide if we should intermix some words
+        let shouldIntermix = Bool.random()
+        
+        if shouldIntermix && !shuffledOlderUserWords.isEmpty && !shuffledSystemWords.isEmpty {
+            // Create a truly randomized list but with recent user words at the front
+            var finalList = shuffledRecentUserWords
+            
+            // Combine and shuffle older user words and system words
+            var remainingWords = shuffledOlderUserWords + shuffledSystemWords
+            remainingWords.shuffle()
+            
+            finalList.append(contentsOf: remainingWords)
+            return finalList
+        } else {
+            // Simple priority-based order with each group shuffled
+            return shuffledRecentUserWords + shuffledOlderUserWords + shuffledSystemWords
+        }
     }
     
     @MainActor
@@ -106,12 +212,17 @@ class SlangViewModel: ObservableObject {
                 createdAt: Date()
             )
             
-            // Add to the beginning of the array
-            allWords.insert(newWord, at: 0)
+            // Insert the new word and reshuffle everything
+            var updatedWords = allWords
+            updatedWords.insert(newWord, at: 0) // Put new word at position 0
+            allWords = randomizeWordsWithPriority(updatedWords)
             
-            // Reset the current index to show the new word
-            currentIndex = 0
+            // Reset to show the newly added word first
+            currentIndex = allWords.firstIndex(where: { $0.id == newWordId }) ?? 0
             currentWord = allWords[currentIndex]
+            
+            // Update lastWordsFetchTime
+            lastWordsFetchTime = Date()
             
             // Trigger a refresh on the discover view
             shouldRefreshDiscoverView = true
@@ -177,9 +288,33 @@ class SlangViewModel: ObservableObject {
         if currentIndex < allWords.count - 1 {
             currentIndex += 1
             currentWord = allWords[currentIndex]
+            
+            // If we're getting near the end, refresh to get new words
+            if currentIndex > allWords.count - 5 {
+                Task {
+                    await checkForNewWords()
+                }
+            }
         } else {
-            // End of deck
-            currentWord = nil
+            // End of deck - try to get new words
+            Task {
+                await checkForNewWords()
+                
+                // If we got new words, reset index to show them
+                if allWords.count > 0 {
+                    await MainActor.run {
+                        // Completely reshuffle before starting again
+                        allWords = randomizeWordsWithPriority(allWords)
+                        currentIndex = 0
+                        currentWord = allWords[currentIndex]
+                    }
+                } else {
+                    // No new words, show end state
+                    await MainActor.run {
+                        currentWord = nil
+                    }
+                }
+            }
         }
     }
     

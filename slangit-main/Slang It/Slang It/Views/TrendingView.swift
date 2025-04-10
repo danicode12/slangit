@@ -110,9 +110,22 @@ struct LeaderboardRow: View {
                     .font(.system(size: 22, weight: .bold))
                     .foregroundColor(.black)
                 
-                Text("by @\(word.username)")
-                    .font(.system(size: 14))
-                    .foregroundColor(.black.opacity(0.7))
+                HStack(spacing: 10) {
+                    Text("by @\(word.username)")
+                        .font(.system(size: 14))
+                        .foregroundColor(.black.opacity(0.7))
+                    
+                    // Added upvotes display
+                    HStack(spacing: 3) {
+                        Image(systemName: "flame.fill")
+                            .font(.system(size: 12))
+                            .foregroundColor(.orange)
+                        
+                        Text("\(word.upvotes)")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.black.opacity(0.8))
+                    }
+                }
             }
             
             Spacer()

@@ -1,6 +1,7 @@
 import SwiftUI
 import Firebase
 import FirebaseFirestore
+import FirebaseAuth
 
 struct CreateView: View {
     @EnvironmentObject var viewModel: SlangViewModel
@@ -9,6 +10,7 @@ struct CreateView: View {
     @State private var showAlert = false
     @State private var isLoading = false
     @State private var alertMessage = "your new word is out!"
+    @FocusState private var isWordFocused: Bool
     
     var body: some View {
         ZStack {
@@ -40,6 +42,11 @@ struct CreateView: View {
                             TextField("", text: $word)
                                 .font(.system(size: 32, weight: .black))
                                 .foregroundColor(.black)
+                                .focused($isWordFocused)
+                                .submitLabel(.done) // Changes return key to "Done"
+                                .onSubmit {
+                                    isWordFocused = false
+                                }
                         }
                         .padding(.bottom, 10)
                         
@@ -68,6 +75,8 @@ struct CreateView: View {
                         
                         // Submit button - navy blue button
                         Button(action: {
+                            // Dismiss keyboard when submitting
+                            hideKeyboard()
                             addNewWord()
                         }) {
                             ZStack {
@@ -118,6 +127,10 @@ struct CreateView: View {
                     }
                 )
             }
+            .onTapGesture {
+                // Dismiss keyboard when tapping outside text fields
+                hideKeyboard()
+            }
         }
         .alert(isPresented: $showAlert) {
             Alert(
@@ -128,30 +141,124 @@ struct CreateView: View {
         }
     }
     
+    private func hideKeyboard() {
+        isWordFocused = false
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+    
     private func addNewWord() {
+        // Validate inputs
+        if word.isEmpty || definition.isEmpty {
+            alertMessage = "Please enter both a word and definition"
+            showAlert = true
+            return
+        }
+        
+        // Show loading indicator
         isLoading = true
         
-        Task {
-            let success = await viewModel.addWord(word: word, definition: definition)
+        // Check if user is logged in
+        guard let userId = Auth.auth().currentUser?.uid else {
+            isLoading = false
+            alertMessage = "You must be logged in to add words"
+            showAlert = true
+            return
+        }
+        
+        let db = Firestore.firestore()
+        
+        // Get the current username
+        db.collection("users").document(userId).getDocument { userDocument, userError in
+            if let userError = userError {
+                handleError("Error getting user info: \(userError.localizedDescription)")
+                return
+            }
             
-            await MainActor.run {
-                isLoading = false
+            let username = userDocument?.data()?["username"] as? String ?? "Unknown"
+            
+            // 1. Create the new word document
+            let newWordRef = db.collection("slangWords").document()
+            let wordData: [String: Any] = [
+                "word": word,
+                "definition": definition,
+                "upvotes": 0,
+                "downvotes": 0,
+                "createdAt": Timestamp(),
+                "createdBy": userId,
+                "username": username
+            ]
+            
+            newWordRef.setData(wordData) { error in
+                if let error = error {
+                    handleError("Error adding word: \(error.localizedDescription)")
+                    return
+                }
                 
-                if success {
-                    word = ""
-                    definition = ""
-                    alertMessage = "Your slang word has been added!"
-                    showAlert = true
-                } else if let error = viewModel.errorMessage {
-                    alertMessage = "Error: \(error)"
-                    showAlert = true
+                // 2. Update the user's createdWords array
+                let userRef = db.collection("users").document(userId)
+                
+                // First check if the createdWords array exists
+                userRef.getDocument { document, error in
+                    if let error = error {
+                        handleError("Error checking user document: \(error.localizedDescription)")
+                        return
+                    }
+                    
+                    if let document = document, document.exists {
+                        // If createdWords doesn't exist yet, initialize it
+                        if document.data()?["createdWords"] == nil {
+                            userRef.updateData([
+                                "createdWords": [newWordRef.documentID]
+                            ]) { error in
+                                if let error = error {
+                                    handleError("Error initializing createdWords: \(error.localizedDescription)")
+                                    return
+                                }
+                                handleSuccess()
+                            }
+                        } else {
+                            // If it exists, add to it using arrayUnion
+                            userRef.updateData([
+                                "createdWords": FieldValue.arrayUnion([newWordRef.documentID])
+                            ]) { error in
+                                if let error = error {
+                                    handleError("Error updating createdWords: \(error.localizedDescription)")
+                                    return
+                                }
+                                handleSuccess()
+                            }
+                        }
+                    } else {
+                        handleError("User document not found")
+                    }
                 }
             }
         }
     }
+    
+    // Helper functions to handle success and error cases
+    private func handleSuccess() {
+        DispatchQueue.main.async {
+            self.isLoading = false
+            self.word = ""
+            self.definition = ""
+            self.alertMessage = "Your slang word has been added!"
+            self.showAlert = true
+            print("Word successfully added and user document updated")
+        }
+    }
+    
+    private func handleError(_ message: String) {
+        DispatchQueue.main.async {
+            self.isLoading = false
+            self.alertMessage = message
+            self.showAlert = true
+            print(message)
+        }
+    }
 }
 
-// Custom wrapper for TextEditor to ensure yellow background
+// Custom wrapper for TextEditor to ensure yellow background with keyboard dismissal
 struct YellowBackgroundTextEditor: UIViewRepresentable {
     @Binding var text: String
     
@@ -165,6 +272,13 @@ struct YellowBackgroundTextEditor: UIViewRepresentable {
         textView.isSelectable = true
         textView.isScrollEnabled = true
         textView.textContainerInset = UIEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
+        
+        // Configure return key to be "Done"
+        textView.returnKeyType = .done
+        
+        // Make it dismiss on Done press
+        textView.enablesReturnKeyAutomatically = false
+        
         return textView
     }
     
@@ -178,6 +292,7 @@ struct YellowBackgroundTextEditor: UIViewRepresentable {
     
     class Coordinator: NSObject, UITextViewDelegate {
         var parent: YellowBackgroundTextEditor
+        weak var currentTextView: UITextView?
         
         init(_ parent: YellowBackgroundTextEditor) {
             self.parent = parent
@@ -185,6 +300,20 @@ struct YellowBackgroundTextEditor: UIViewRepresentable {
         
         func textViewDidChange(_ textView: UITextView) {
             parent.text = textView.text
+            self.currentTextView = textView
+        }
+        
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            self.currentTextView = textView
+        }
+        
+        func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+            // If return key was pressed, dismiss keyboard
+            if text == "\n" {
+                textView.resignFirstResponder()
+                return false
+            }
+            return true
         }
     }
 }

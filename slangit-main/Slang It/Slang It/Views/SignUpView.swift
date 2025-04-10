@@ -5,7 +5,6 @@ import FirebaseFirestore
 
 struct SignUpView: View {
     @Binding var isLoggedIn: Bool  // This binding controls navigation to main app
-    @Environment(\.presentationMode) var presentationMode
     
     @State private var email: String = ""
     @State private var password: String = ""
@@ -43,13 +42,22 @@ struct SignUpView: View {
             }
             
             // Content
-            VStack {
+            VStack(spacing: 0) {
+                // Logo at the top
+                Image("logo") // Make sure "logo" is the name of your image in Assets.xcassets
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 250, height: 250)
+                    .padding(.top, 60)
+                
+                Spacer()
+                    .frame(height: 10)
+                
+                // Create account text - moved to be right above the text fields
                 Text("create account")
                     .font(.system(size: 32, weight: .bold))
                     .foregroundColor(.black)
-                    .padding(.top, 80)
-                
-                Spacer()
+                    .padding(.bottom, 30)
                 
                 VStack(spacing: 25) {
                     // Email field
@@ -154,6 +162,7 @@ struct SignUpView: View {
                             .foregroundColor(.red)
                             .padding(.horizontal, 30)
                             .padding(.top, 10)
+                            .multilineTextAlignment(.center)
                     }
                     
                     // Sign up button
@@ -178,17 +187,6 @@ struct SignUpView: View {
                     .padding(.horizontal, 30)
                     .padding(.top, 10)
                     .disabled(isLoading)
-                    
-                    // Back to login link
-                    Button(action: {
-                        presentationMode.wrappedValue.dismiss()
-                    }) {
-                        Text("already have an account? log in")
-                            .font(.system(size: 16))
-                            .foregroundColor(Color(hex: "162959"))
-                            .underline()
-                    }
-                    .padding(.top, 20)
                 }
                 
                 Spacer()
@@ -202,7 +200,7 @@ struct SignUpView: View {
         }
     }
     
-    // Sign-Up function using Firebase
+    // Updated Sign-Up function using Firebase
     func signUp() {
         // Validation
         if username.isEmpty {
@@ -224,53 +222,49 @@ struct SignUpView: View {
         isLoading = true
         errorMessage = ""
         
-        Auth.auth().createUser(withEmail: email, password: password) { [self] result, error in
+        Auth.auth().createUser(withEmail: email, password: password) { authResult, error in
             if let error = error {
+                print("Firebase Auth Error: \(error.localizedDescription)")
                 DispatchQueue.main.async {
-                    isLoading = false
-                    errorMessage = "sign-up error: \(error.localizedDescription)"
-                }
-                print("Auth error: \(error)")
-                return
-            }
-            
-            guard let user = result?.user else {
-                DispatchQueue.main.async {
-                    isLoading = false
-                    errorMessage = "failed to create user"
+                    self.isLoading = false
+                    self.errorMessage = "sign-up error: \(error.localizedDescription)"
                 }
                 return
             }
             
-            print("User created with ID: \(user.uid)")
+            guard let user = authResult?.user else {
+                DispatchQueue.main.async {
+                    self.isLoading = false
+                    self.errorMessage = "failed to create user"
+                }
+                return
+            }
             
             // Save the username to Firestore
             let db = Firestore.firestore()
             let userData: [String: Any] = [
                 "username": self.username,
+                "email": self.email,
                 "createdWords": [],
                 "likedWords": [],
                 "dislikedWords": []
             ]
             
-            db.collection("users").document(user.uid).setData(userData) { [self] error in
-                // Always update UI on main thread
+            db.collection("users").document(user.uid).setData(userData) { firestoreError in
                 DispatchQueue.main.async {
-                    isLoading = false
+                    self.isLoading = false
                     
-                    if let error = error {
-                        print("Firestore error: \(error.localizedDescription)")
-                        errorMessage = "error saving profile data"
+                    if let firestoreError = firestoreError {
+                        print("Firestore Error: \(firestoreError.localizedDescription)")
+                        self.errorMessage = "error saving profile data: \(firestoreError.localizedDescription)"
                         return
                     }
                     
-                    print("User data saved successfully for: \(username)")
+                    print("User created successfully with ID: \(user.uid)")
+                    print("User data saved successfully for: \(self.username)")
                     
-                    // This is the key line - set isLoggedIn to true to navigate to main app
-                    isLoggedIn = true
-                    
-                    // Print a confirmation to verify the binding was updated
-                    print("isLoggedIn set to true, should navigate to main app")
+                    // This is the critical line - set isLoggedIn to true AFTER successful account creation
+                    self.isLoggedIn = true
                 }
             }
         }
